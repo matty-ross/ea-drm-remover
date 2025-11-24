@@ -8,6 +8,7 @@ def main() -> None:
     pe_path = filedialog.askopenfilename()
     
     ea_drm = EA_DRM(license_path, pe_path)
+    ea_drm.fix_pe_header()
     ea_drm.decrypt_sections()
     ea_drm.save()
 

@@ -11,6 +11,8 @@ from Crypto.Util import Padding
 LICENSE_KEY = base64.b64decode("QTJyLdCC77DcZFfFdmjKCQ==")
 
 # TODO: move these offsets to a config file (or try to compute them?)
+ENTRY_POINT_OFFSET = 0x3EA
+DATA_DIRECTORIES_OFFSET = 0x5E4
 ENCRYPTED_SECTIONS_TABLE_OFFSET = 0x3EE
 
 
@@ -34,6 +36,7 @@ class EA_DRM:
 
     def save(self) -> None:
         new_pe_path = self._pe_path.with_stem(self._pe_path.stem + '_no_drm')
+        self._pe.OPTIONAL_HEADER.CheckSum = self._pe.generate_checksum()
         self._pe.write(new_pe_path)
 
     
@@ -48,6 +51,18 @@ class EA_DRM:
                 padding=self._read_ooa(offset + 0x20, '16B'),
             )
             self._decrypt_section(encrypted_section)
+
+
+    def fix_pe_header(self) -> None:
+        self._pe.OPTIONAL_HEADER.AddressOfEntryPoint = self._read_ooa(ENTRY_POINT_OFFSET, '<L')
+        
+        get_data_directory = lambda name: self._pe.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY[name]]
+        get_data_directory('IMAGE_DIRECTORY_ENTRY_IMPORT').VirtualAddress = self._read_ooa(DATA_DIRECTORIES_OFFSET + 0x0, '<L')
+        get_data_directory('IMAGE_DIRECTORY_ENTRY_IMPORT').Size = self._read_ooa(DATA_DIRECTORIES_OFFSET + 0x4, '<L')
+        get_data_directory('IMAGE_DIRECTORY_ENTRY_BASERELOC').VirtualAddress = self._read_ooa(DATA_DIRECTORIES_OFFSET + 0x8, '<L')
+        get_data_directory('IMAGE_DIRECTORY_ENTRY_BASERELOC').Size = self._read_ooa(DATA_DIRECTORIES_OFFSET + 0xC, '<L')
+        get_data_directory('IMAGE_DIRECTORY_ENTRY_IAT').VirtualAddress = self._read_ooa(DATA_DIRECTORIES_OFFSET + 0x10, '<L')
+        get_data_directory('IMAGE_DIRECTORY_ENTRY_IAT').Size = self._read_ooa(DATA_DIRECTORIES_OFFSET + 0x14, '<L')
 
 
     def _decrypt_section(self, encrypted_section: EncryptedSection) -> None:
@@ -67,7 +82,7 @@ class EA_DRM:
     def _get_decryption_key(self) -> bytes:
         with open(self._license_path, 'rb') as license_file:
             license_file.seek(0x41)
-            encrypted_license = license_file.read()        
+            encrypted_license = license_file.read()
         decrypted_license = EA_DRM._aes_decrypt(LICENSE_KEY, encrypted_license).decode('utf-8')
         
         start = decrypted_license.find('<CipherKey>') + 11
