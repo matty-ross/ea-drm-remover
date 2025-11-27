@@ -1,4 +1,3 @@
-import pathlib
 import struct
 import base64
 from dataclasses import dataclass
@@ -27,15 +26,12 @@ class EncryptedSection:
 class EA_DRM:
 
     def __init__(self, license_path: str, pe_path: str):
-        self._license_path = pathlib.Path(license_path)
-        self._pe_path = pathlib.Path(pe_path)
-        self._decryption_key = self._get_decryption_key()
+        self._decryption_key = self._get_decryption_key(license_path)
         self._pe = pefile.PE(pe_path, fast_load=True)
         self._ooa_rva = self._get_oaa_section_rva()
 
 
-    def save(self) -> None:
-        new_pe_path = self._pe_path.with_stem(self._pe_path.stem + '_no_drm')
+    def save_pe(self, new_pe_path: str) -> None:
         self._pe.OPTIONAL_HEADER.CheckSum = self._pe.generate_checksum()
         self._pe.write(new_pe_path)
 
@@ -79,10 +75,11 @@ class EA_DRM:
         self._pe.set_bytes_at_rva(encrypted_section.rva, decrypted_data + padding)
 
 
-    def _get_decryption_key(self) -> bytes:
-        with open(self._license_path, 'rb') as license_file:
+    def _get_decryption_key(self, license_path: str) -> bytes:
+        with open(license_path, 'rb') as license_file:
             license_file.seek(0x41)
             encrypted_license = license_file.read()
+        
         decrypted_license = EA_DRM._aes_decrypt(LICENSE_KEY, encrypted_license).decode('utf-8')
         
         start = decrypted_license.find('<CipherKey>') + 11
@@ -92,7 +89,7 @@ class EA_DRM:
 
     def _get_oaa_section_rva(self) -> int:
         for section in self._pe.sections:
-            if section.Name.strip(b'\x00') == b'.ooa':
+            if section.Name.rstrip(b'\x00') == b'.ooa':
                 return section.VirtualAddress
         raise Exception(f"No .ooa section in the PE file.")
 
@@ -106,6 +103,6 @@ class EA_DRM:
 
     @staticmethod
     def _aes_decrypt(key: bytes, encrypted_data: bytes) -> bytes:
-        aes = AES.new(key=key, mode=AES.MODE_CBC, iv=bytes(16))
+        aes = AES.new(key, AES.MODE_CBC, iv=bytes(16))
         decrypted_data = Padding.unpad(aes.decrypt(encrypted_data), AES.block_size)
         return decrypted_data
