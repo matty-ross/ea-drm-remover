@@ -9,18 +9,20 @@ from Crypto.Util import Padding
 
 LICENSE_KEY = base64.b64decode("QTJyLdCC77DcZFfFdmjKCQ==")
 
-# TODO: move these offsets to a config file (or try to compute them?)
-ENTRY_POINT_OFFSET = 0x3EA
-DATA_DIRECTORIES_OFFSET = 0x5E4
-ENCRYPTED_SECTIONS_TABLE_OFFSET = 0x3EE
+
+@dataclass
+class OoaOffsets:
+    entry_point: int = None
+    encrypted_sections: int = None
+    data_directories: int = None
 
 
 @dataclass
 class EncryptedSection:
-    rva: int
-    encrypted_size: int
-    decrypted_size: int
-    padding: bytes
+    rva: int = None
+    encrypted_size: int = None
+    decrypted_size: int = None
+    padding: bytes = None
 
 
 class EA_DRM:
@@ -28,7 +30,8 @@ class EA_DRM:
     def __init__(self, license_path: str, pe_path: str):
         self._decryption_key = self._get_decryption_key(license_path)
         self._pe = pefile.PE(pe_path, fast_load=True)
-        self._ooa_rva = self._get_oaa_section_rva()
+        self._ooa_section = self._find_oaa_section()
+        self._ooa_offsets = self._get_ooa_offsets()
 
 
     def save_pe(self, new_pe_path: str) -> None:
@@ -37,9 +40,9 @@ class EA_DRM:
 
     
     def decrypt_sections(self) -> None:
-        count = self._read_ooa(ENCRYPTED_SECTIONS_TABLE_OFFSET, 'B')
+        count = self._read_ooa(self._ooa_offsets.encrypted_sections, 'B')
         for i in range(count):
-            offset = ENCRYPTED_SECTIONS_TABLE_OFFSET + 0x1 + i * 0x30
+            offset = self._ooa_offsets.encrypted_sections + 0x1 + i * 0x30
             encrypted_section = EncryptedSection(
                 rva=self._read_ooa(offset + 0x0, '<L'),
                 encrypted_size=self._read_ooa(offset + 0x4, '<L'),
@@ -50,15 +53,14 @@ class EA_DRM:
 
 
     def fix_pe_header(self) -> None:
-        self._pe.OPTIONAL_HEADER.AddressOfEntryPoint = self._read_ooa(ENTRY_POINT_OFFSET, '<L')
+        self._pe.OPTIONAL_HEADER.AddressOfEntryPoint = self._read_ooa(self._ooa_offsets.entry_point, '<L')
         
-        get_data_directory = lambda name: self._pe.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY[name]]
-        get_data_directory('IMAGE_DIRECTORY_ENTRY_IMPORT').VirtualAddress = self._read_ooa(DATA_DIRECTORIES_OFFSET + 0x0, '<L')
-        get_data_directory('IMAGE_DIRECTORY_ENTRY_IMPORT').Size = self._read_ooa(DATA_DIRECTORIES_OFFSET + 0x4, '<L')
-        get_data_directory('IMAGE_DIRECTORY_ENTRY_BASERELOC').VirtualAddress = self._read_ooa(DATA_DIRECTORIES_OFFSET + 0x8, '<L')
-        get_data_directory('IMAGE_DIRECTORY_ENTRY_BASERELOC').Size = self._read_ooa(DATA_DIRECTORIES_OFFSET + 0xC, '<L')
-        get_data_directory('IMAGE_DIRECTORY_ENTRY_IAT').VirtualAddress = self._read_ooa(DATA_DIRECTORIES_OFFSET + 0x10, '<L')
-        get_data_directory('IMAGE_DIRECTORY_ENTRY_IAT').Size = self._read_ooa(DATA_DIRECTORIES_OFFSET + 0x14, '<L')
+        self._get_pe_data_directory('IMAGE_DIRECTORY_ENTRY_IMPORT').VirtualAddress = self._read_ooa(self._ooa_offsets.data_directories + 0x0, '<L')
+        self._get_pe_data_directory('IMAGE_DIRECTORY_ENTRY_IMPORT').Size = self._read_ooa(self._ooa_offsets.data_directories + 0x4, '<L')
+        self._get_pe_data_directory('IMAGE_DIRECTORY_ENTRY_BASERELOC').VirtualAddress = self._read_ooa(self._ooa_offsets.data_directories + 0x8, '<L')
+        self._get_pe_data_directory('IMAGE_DIRECTORY_ENTRY_BASERELOC').Size = self._read_ooa(self._ooa_offsets.data_directories + 0xC, '<L')
+        self._get_pe_data_directory('IMAGE_DIRECTORY_ENTRY_IAT').VirtualAddress = self._read_ooa(self._ooa_offsets.data_directories + 0x10, '<L')
+        self._get_pe_data_directory('IMAGE_DIRECTORY_ENTRY_IAT').Size = self._read_ooa(self._ooa_offsets.data_directories + 0x14, '<L')
 
 
     def _decrypt_section(self, encrypted_section: EncryptedSection) -> None:
@@ -87,15 +89,39 @@ class EA_DRM:
         return base64.b64decode(decrypted_license[start:end])[:16]
     
 
-    def _get_oaa_section_rva(self) -> int:
+    def _get_ooa_offsets(self) -> OoaOffsets:
+        ooa_offsets = OoaOffsets()
+        
+        offset = self._get_pe_data_directory('IMAGE_DIRECTORY_ENTRY_BASERELOC').VirtualAddress - self._ooa_section.VirtualAddress
+        offset += self._read_ooa(offset - 0x8, '<L') # Is this reliable?
+        offset += 0x10
+        ooa_offsets.entry_point = offset
+
+        offset += 0x4
+        ooa_offsets.encrypted_sections = offset
+
+        offset = self._ooa_section.Misc_VirtualSize
+        offset -= 0x16
+        offset -= 0x18
+        ooa_offsets.data_directories = offset
+
+        return ooa_offsets
+
+
+    def _find_oaa_section(self) -> pefile.Structure:
         for section in self._pe.sections:
             if section.Name.rstrip(b'\x00') == b'.ooa':
-                return section.VirtualAddress
+                return section
         raise Exception(f"No .ooa section in the PE file.")
+
+
+    def _get_pe_data_directory(self, name: str) -> pefile.Structure:
+        index = pefile.DIRECTORY_ENTRY[name]
+        return self._pe.OPTIONAL_HEADER.DATA_DIRECTORY[index]
 
     
     def _read_ooa(self, offset: int, format: str):
-        rva = self._ooa_rva + offset
+        rva = self._ooa_section.VirtualAddress + offset
         buffer = self._pe.get_data(rva, struct.calcsize(format))
         value = struct.unpack(format, buffer)
         return value[0] if len(value) == 1 else value
