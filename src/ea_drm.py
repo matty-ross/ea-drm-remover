@@ -40,7 +40,7 @@ class EA_DRM:
 
     
     def decrypt_sections(self) -> None:
-        count = self._read_ooa(self._ooa_offsets.encrypted_sections, 'B')
+        count = self._read_ooa(self._ooa_offsets.encrypted_sections + 0x0, 'B')
         for i in range(count):
             offset = self._ooa_offsets.encrypted_sections + 0x1 + i * 0x30
             encrypted_section = EncryptedSection(

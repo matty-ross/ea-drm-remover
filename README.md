@@ -11,8 +11,6 @@ A tool to remove EA DRM from PE files.
 python .\src\main.py
 ```
 
-You will be prompted to choose:
-
-- a license file for the game (`*.dlf`)
-- the game executable (`*.exe`)
-- where to save the new game executable
+1. Choose the game's license file (`*.dlf`)
+1. Choose the game's PE file (`*.exe`)
+1. Choose a new PE file
