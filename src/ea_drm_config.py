@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 @dataclass
 class EaDrmConfig:
+    misc_offset: int
     encrypted_sections_offset: int
     original_data_directories_offset: int
 

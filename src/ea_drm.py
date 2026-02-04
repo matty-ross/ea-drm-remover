@@ -46,7 +46,7 @@ def decrypt_sections(pe: pefile.PE, config: EaDrmConfig, cipher_key: bytes) -> N
 def fix_pe_header(pe: pefile.PE, config: EaDrmConfig) -> None:
     ooa_data = _get_ooa_data(pe)
 
-    pe.OPTIONAL_HEADER.AddressOfEntryPoint = None # TODO
+    pe.OPTIONAL_HEADER.AddressOfEntryPoint = struct.unpack_from('<L', ooa_data, config.misc_offset + 0x10)
 
     data_directory_names = [
         'IMAGE_DIRECTORY_ENTRY_IMPORT',
@@ -57,6 +57,10 @@ def fix_pe_header(pe: pefile.PE, config: EaDrmConfig) -> None:
         data_directory = _get_pe_data_directory(pe, data_directory_name)
         data_directory.VirtualAddress = struct.unpack_from('<L', ooa_data, config.original_data_directories_offset + i * 0x8 + 0x0)[0]
         data_directory.Size = struct.unpack_from('<L', ooa_data, config.original_data_directories_offset + i * 0x8 + 0x4)[0]
+
+
+def fix_tls_callback(pe: pefile.PE, config: EaDrmConfig) -> None:
+    pass
 
 
 def _get_ooa_data(pe: pefile.PE) -> bytes:

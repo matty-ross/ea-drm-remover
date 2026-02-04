@@ -19,6 +19,7 @@ def main() -> None:
     print("Processing...")
     ea_drm.decrypt_sections(pe, config, cipher_key)
     ea_drm.fix_pe_header(pe, config)
+    ea_drm.fix_tls_callback(pe, config)
 
     new_pe_file_path = filedialog.asksaveasfilename(title="New PE file", defaultextension='exe')
     print("Saving...")
