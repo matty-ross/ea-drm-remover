@@ -21,7 +21,7 @@ def get_cipher_key(license_file_path: str) -> bytes:
     decrypted_license = _aes_decrypt(encrypted_license, _LICENSE_CIPHER_KEY)
 
     xml = ElementTree.fromstring(decrypted_license.decode('utf-8'))
-    cipher_key = xml.find('CipherKey')
+    cipher_key = xml.find('./{*}CipherKey').text
 
     return base64.b64decode(cipher_key)[:16]
 
@@ -31,7 +31,7 @@ def decrypt_sections(pe: pefile.PE, config: EaDrmConfig, cipher_key: bytes) -> N
 
     count = struct.unpack_from('B', ooa_data, config.encrypted_sections_offset + 0x0)[0]
     for i in range(count):
-        offset = config.encrypted_sections_offset + 0x1 * i * 0x30
+        offset = config.encrypted_sections_offset + 0x1 + i * 0x30
 
         rva = struct.unpack_from('<L', ooa_data, offset + 0x0)[0]
         encrypted_size = struct.unpack_from('<L', ooa_data, offset + 0x4)[0]
@@ -46,7 +46,7 @@ def decrypt_sections(pe: pefile.PE, config: EaDrmConfig, cipher_key: bytes) -> N
 def fix_pe_header(pe: pefile.PE, config: EaDrmConfig) -> None:
     ooa_data = _get_ooa_data(pe)
 
-    pe.OPTIONAL_HEADER.AddressOfEntryPoint = struct.unpack_from('<L', ooa_data, config.misc_offset + 0x10)
+    pe.OPTIONAL_HEADER.AddressOfEntryPoint = struct.unpack_from('<L', ooa_data, config.misc_offset + 0x10)[0]
 
     data_directory_names = [
         'IMAGE_DIRECTORY_ENTRY_IMPORT',
@@ -59,8 +59,14 @@ def fix_pe_header(pe: pefile.PE, config: EaDrmConfig) -> None:
         data_directory.Size = struct.unpack_from('<L', ooa_data, config.original_data_directories_offset + i * 0x8 + 0x4)[0]
 
 
-def fix_tls_callback(pe: pefile.PE, config: EaDrmConfig) -> None:
-    pass
+def fix_first_tls_callback(pe: pefile.PE, config: EaDrmConfig) -> None:
+    ooa_data = _get_ooa_data(pe)
+    pointer_format = _get_pe_pointer_format(pe)
+
+    tls_callbacks_rva = struct.unpack_from('<L', ooa_data, config.misc_offset + 0x4)[0]
+    first_tls_callback = struct.unpack_from(pointer_format, ooa_data, config.misc_offset + 0x8)[0]
+    if tls_callbacks_rva != 0 and first_tls_callback != 0:
+        pe.set_bytes_at_rva(tls_callbacks_rva, struct.pack(pointer_format, first_tls_callback))
 
 
 def _get_ooa_data(pe: pefile.PE) -> bytes:
@@ -75,6 +81,15 @@ def _aes_decrypt(encrypted_data: bytes, key: bytes) -> bytes:
     aes = AES.new(key, AES.MODE_CBC, iv=bytes(16))
     decrypted_data = Padding.unpad(aes.decrypt(encrypted_data), AES.block_size)
     return decrypted_data
+
+
+def _get_pe_pointer_format(pe: pefile.PE) -> str:
+    match pe.OPTIONAL_HEADER.Magic:
+        case pefile.OPTIONAL_HEADER_MAGIC_PE:
+            return '<L'
+        case pefile.OPTIONAL_HEADER_MAGIC_PE_PLUS:
+            return '<Q'
+    raise Exception("Invalid PE file.")
 
 
 def _get_pe_data_directory(pe: pefile.PE, data_directory_name: str) -> pefile.Structure:
