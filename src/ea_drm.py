@@ -9,7 +9,7 @@ from Crypto.Util import Padding
 from ea_drm_config import EaDrmConfig
 
 
-_LICENSE_CIPHER_KEY = base64.b64decode("QTJyLdCC77DcZFfFdmjKCQ==")
+_LICENSE_CIPHER_KEY = base64.b64decode('QTJyLdCC77DcZFfFdmjKCQ==')
 _OOA_PE_SECTION_NAME = '.ooa'
 
 
